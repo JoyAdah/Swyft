@@ -383,7 +383,43 @@ describe('IndexerWorker Integration (test-db)', () => {
 
       const pool = db.pools.get('pool-integration-1') as PoolRow;
       expect(pool).toBeDefined();
+      expect(pool.token0Address).toBe(IndexerWorker.UNKNOWN_TOKEN_ADDRESS);
+      expect(pool.token1Address).toBe(IndexerWorker.UNKNOWN_TOKEN_ADDRESS);
       expect(pool.currentTick).toBe(100);
+    });
+
+    it('backfills placeholder tokens when pool.created arrives after a swap', async () => {
+      // Swap arrives first and creates a placeholder pool.
+      const swapHandler = getHandler(QUEUE_NAMES.SWAP_PROCESSED);
+      await swapHandler(makeJob(swapData));
+
+      const placeholderPool = db.pools.get(swapData.poolId) as PoolRow;
+      expect(placeholderPool.token0Address).toBe(
+        IndexerWorker.UNKNOWN_TOKEN_ADDRESS,
+      );
+      expect(placeholderPool.token1Address).toBe(
+        IndexerWorker.UNKNOWN_TOKEN_ADDRESS,
+      );
+
+      // The authoritative pool.created event must overwrite the placeholders.
+      const poolHandler = getHandler(QUEUE_NAMES.POOL_CREATED);
+      await poolHandler(
+        makeJob<PoolCreatedJobData>({
+          eventId: 'int-pool-backfill',
+          poolId: swapData.poolId,
+          tokenA: 'XLM',
+          tokenB: 'USDC',
+          fee: '3000',
+          sqrtPriceX96: swapData.sqrtPriceX96,
+          ledger: 1005,
+        }),
+      );
+
+      const pool = db.pools.get(swapData.poolId) as PoolRow;
+      expect(pool).toBeDefined();
+      expect(pool.token0Address).toBe('XLM');
+      expect(pool.token1Address).toBe('USDC');
+      expect(pool.feeTier).toBe(3000);
     });
 
     it('updates existing pool state on swap', async () => {
