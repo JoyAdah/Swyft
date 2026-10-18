@@ -42,10 +42,14 @@ export class IndexerWorker implements OnModuleInit, OnModuleDestroy {
   private _isLoading = false;
   private _isReady = false;
   private _isShuttingDown = false;
-  /** Bounds how long a SIGTERM/SIGINT shutdown waits for in-flight jobs before giving up. */
-  private static readonly SHUTDOWN_TIMEOUT_MS = Number(
-    process.env.INDEXER_SHUTDOWN_TIMEOUT_MS ?? 25_000,
-  );
+  /**
+   * Bounds how long a SIGTERM/SIGINT shutdown waits for in-flight jobs before
+   * giving up. Read at shutdown time (not class-load time) so tests and runtime
+   * config changes can override INDEXER_SHUTDOWN_TIMEOUT_MS per shutdown.
+   */
+  private get shutdownTimeoutMs(): number {
+    return Number(process.env.INDEXER_SHUTDOWN_TIMEOUT_MS ?? 25_000);
+  }
 
   constructor(
     private readonly prisma: PrismaService,
@@ -119,7 +123,7 @@ export class IndexerWorker implements OnModuleInit, OnModuleDestroy {
     this._isShuttingDown = true;
     this._isReady = false;
     this.logger.log(
-      `Received shutdown signal — draining in-flight jobs (timeout ${IndexerWorker.SHUTDOWN_TIMEOUT_MS}ms)`,
+      `Received shutdown signal — draining in-flight jobs (timeout ${this.shutdownTimeoutMs}ms)`,
     );
     if (this.queueDepthTimer) clearInterval(this.queueDepthTimer);
 
@@ -129,7 +133,7 @@ export class IndexerWorker implements OnModuleInit, OnModuleDestroy {
     ]);
     await this.withTimeout(
       closeAll,
-      IndexerWorker.SHUTDOWN_TIMEOUT_MS,
+      this.shutdownTimeoutMs,
       'Timed out waiting for indexer workers to drain in-flight jobs — forcing shutdown',
     );
 

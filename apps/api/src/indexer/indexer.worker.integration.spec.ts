@@ -628,4 +628,31 @@ describe('IndexerWorker Integration (test-db)', () => {
       expect(afterSecond.liquidity).toBe(afterFirst.liquidity);
     });
   });
+
+  describe('graceful shutdown timeout', () => {
+    it('gives up and resolves when worker.close() never resolves', async () => {
+      const original = process.env.INDEXER_SHUTDOWN_TIMEOUT_MS;
+      process.env.INDEXER_SHUTDOWN_TIMEOUT_MS = '50';
+      // A stuck worker whose close() never resolves must not hang the process.
+      mockWorkerClose.mockReturnValueOnce(new Promise<void>(() => {}));
+
+      try {
+        const started = Date.now();
+        const destroyPromise = worker.onModuleDestroy();
+
+        // Shutdown is in-flight and the worker has not closed yet.
+        expect(worker.isShuttingDown).toBe(true);
+
+        await destroyPromise;
+        // Resolved within a small margin of the 50ms timeout.
+        expect(Date.now() - started).toBeLessThan(1_000);
+      } finally {
+        if (original === undefined) {
+          delete process.env.INDEXER_SHUTDOWN_TIMEOUT_MS;
+        } else {
+          process.env.INDEXER_SHUTDOWN_TIMEOUT_MS = original;
+        }
+      }
+    });
+  });
 });
